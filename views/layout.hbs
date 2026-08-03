@@ -70,6 +70,16 @@
    {
         progressBar.hidden=true;
         log.textContent='Compressing completed successfully !'
+        // A finished download is not always a complete one. Say so on the page
+        // rather than handing back a partial site that looks whole.
+        if(event.warning)
+        {
+             const caution=document.createElement('strong');
+             caution.style.color='#b8860b';
+             caution.style.display='block';
+             caution.textContent=event.warning;
+             log.appendChild(caution);
+        }
         downloadWebsite.style.display=''
         downloadWebsite.onclick=function()
         {
