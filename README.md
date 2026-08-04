@@ -1,7 +1,10 @@
 ## Complete Website Downloader 💾
 Download the complete source code of any website (including all assets) 🔨.
 
-👉 Live Demo: https://website-downloader.onrender.com
+👉 Setup guide: https://gabriel-dalton.github.io/Website-downloader/
+
+There is no hosted version of this fork. It runs on your own machine, because it
+writes to disk and a media-heavy site can run to a gigabyte.
 
 ![enter image description here](https://github.com/AhmadIbrahiim/Website-downloader/blob/master/public/Record.gif?raw=true)
 <div align="center">
@@ -74,15 +77,6 @@ Being honest about the limits, since the point of this is offline use:
 - Only the entry page is read for asset hostnames. A sub-page that pulls from a
   CDN nothing on the home page uses will still miss those files.
 
-### Deploy on cloud providers
-[![Run on Replit](https://binbashbanana.github.io/deploy-buttons/buttons/remade/replit.svg)](https://replit.com/github/AhmadIbrahiim/Website-downloader)
-[![Remix on Glitch](https://binbashbanana.github.io/deploy-buttons/buttons/remade/glitch.svg)](https://glitch.com/edit/#!/import/github/AhmadIbrahiim/Website-downloader)
-[![Deploy on Railway](https://binbashbanana.github.io/deploy-buttons/buttons/remade/railway.svg)](https://railway.app/new/template?template=https://github.com/AhmadIbrahiim/Website-downloader)
-[![Deploy to Cyclic](https://binbashbanana.github.io/deploy-buttons/buttons/remade/cyclic.svg)](https://app.cyclic.sh/api/app/deploy/AhmadIbrahiim/Website-downloader)
-[![Deploy to Koyeb](https://binbashbanana.github.io/deploy-buttons/buttons/remade/koyeb.svg)](https://app.koyeb.com/deploy?type=git&repository=github.com/AhmadIbrahiim/Website-downloader&branch=main&name=Website-downloader)
-[![Deploy to Render](https://binbashbanana.github.io/deploy-buttons/buttons/remade/render.svg)](https://render.com/deploy?repo=https://github.com/AhmadIbrahiim/Website-downloader)
-
-
 ## Requirements 📦
 
 - Node.js 16 or newer
@@ -104,20 +98,20 @@ Being honest about the limits, since the point of this is offline use:
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `PORT` | `3000` | Port the server listens on |
-| `DOWNLOAD_QUOTA` | `500m` | Size ceiling passed to wget, so one request cannot fill the disk |
-| `DOWNLOAD_TIMEOUT_MS` | `600000` | How long a single download may run before it is stopped, lookup included |
+| `DOWNLOAD_QUOTA` | `2g` | Size ceiling passed to wget, so a runaway crawl cannot fill the disk |
+| `DOWNLOAD_TIMEOUT_MS` | `1800000` | How long a single download may run before it is stopped, lookup included |
 
-Both ceilings went up when assets started coming down with the HTML. A site's
-images and fonts are far bigger than its markup and take longer to fetch, and
-the old `100m` / 5 minute limits cut most real sites off part way through.
-Lower them again if you are running this somewhere with less disk or patience.
+These are deliberately high. This is meant to be run on your own machine, so
+the limits exist to stop a runaway crawl rather than to ration a shared server.
+A media-heavy site with assets included can reach a gigabyte, and the earlier
+`100m` / 5 minute defaults cut most real sites off part way through. Lower them
+if you are short on disk or patience.
 
-Raise `DOWNLOAD_TIMEOUT_MS` for anything large. A photo-heavy site of a few
-dozen pages can easily run past ten minutes, and a download that runs out of
-time is thrown away rather than saved part-finished, so the request comes back
-as an error and nothing is kept. `DOWNLOAD_QUOTA` behaves better under
-pressure: wget stops cleanly at the ceiling and whatever came down is still
-archived.
+The two behave differently when they bite. `DOWNLOAD_QUOTA` stops wget cleanly:
+everything fetched so far is archived, and the result is flagged on the page as
+incomplete rather than passed off as a finished download. `DOWNLOAD_TIMEOUT_MS`
+throws the partial download away and returns an error, because a run cut off
+mid-file cannot be trusted.
 
 
 

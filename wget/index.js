@@ -14,11 +14,12 @@ var writeStartHere = require('./start-here');
 var DOWNLOAD_ROOT = path.join(__dirname, '..', 'downloads');
 
 // wget mirrors recursively, so without a ceiling a single request can fill the
-// disk. Both limits can be raised through the environment. They are far more
-// generous than they were when only HTML came down: a real site's images and
-// fonts dwarf its markup, and they take longer to fetch.
-var QUOTA = process.env.DOWNLOAD_QUOTA || '500m';
-var TIMEOUT_MS = Number(process.env.DOWNLOAD_TIMEOUT_MS) || 10 * 60 * 1000;
+// disk. This runs on the operator's own machine rather than a shared host, so
+// the ceilings are set high enough to take a whole media-heavy site in one go
+// and exist mainly to stop a runaway crawl. Both are overridable, and hitting
+// either is reported rather than passed off as a finished download.
+var QUOTA = process.env.DOWNLOAD_QUOTA || '2g';
+var TIMEOUT_MS = Number(process.env.DOWNLOAD_TIMEOUT_MS) || 30 * 60 * 1000;
 
 /**
  * wget --mirror --convert-links --adjust-extension --page-requisites
