@@ -26,6 +26,11 @@ function createTracker(startedAt, totalPages) {
     totalPages: totalPages || 0,
     startedAt: startedAt,
 
+    // Rolling state for the speed reading.
+    rate: null,
+    sampledAt: startedAt,
+    sampledBytes: 0,
+
     /**
      * Folds one chunk of stderr in. Returns true when something worth
      * redrawing changed.
@@ -53,9 +58,30 @@ function createTracker(startedAt, totalPages) {
       return changed;
     },
 
-    /** A plain snapshot for the browser. */
+    /**
+     * A plain snapshot for the browser.
+     *
+     * There is deliberately no estimate of time remaining. One was tried and
+     * removed: the only denominator available is the sitemap's page count, but
+     * pages and assets interleave, a photo-heavy page costs many times what a
+     * text one does, and assets keep arriving long after the last page. The
+     * resulting figure wandered up and down and told nobody anything. Speed is
+     * measured rather than predicted, so it is reported instead.
+     */
     snapshot: function (now) {
       var elapsedMs = now - this.startedAt;
+
+      // Smoothed rate over the gap since the last snapshot. A plain average
+      // across the whole run barely moves once it is a few minutes in, so it
+      // stops reflecting what is happening now.
+      var gapMs = now - this.sampledAt;
+      if (gapMs >= 250) {
+        var instant = (this.bytes - this.sampledBytes) / (gapMs / 1000);
+        this.rate = this.rate === null ? instant : (this.rate * 0.7 + instant * 0.3);
+        this.sampledAt = now;
+        this.sampledBytes = this.bytes;
+      }
+
       var out = {
         files: this.files,
         pages: this.pages,
@@ -64,15 +90,7 @@ function createTracker(startedAt, totalPages) {
         elapsedMs: elapsedMs
       };
       if (this.totalPages) out.totalPages = this.totalPages;
-
-      // Only offer a remaining time once there is enough of a sample for it to
-      // mean anything. A confident wrong estimate is worse than none, so this
-      // stays quiet for the first few pages and whenever there is no
-      // denominator to work from.
-      if (this.totalPages && this.pages >= 5 && this.pages < this.totalPages && elapsedMs > 5000) {
-        var perPage = elapsedMs / this.pages;
-        out.remainingMs = Math.round(perPage * (this.totalPages - this.pages));
-      }
+      if (this.rate !== null && this.rate >= 0) out.bytesPerSec = Math.round(this.rate);
       return out;
     }
   };

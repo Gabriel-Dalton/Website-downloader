@@ -7,6 +7,7 @@ var discoverAssetHosts = require('./discover');
 var collectSitemapUrls = require('./sitemap');
 var classifyHosts = require('./classify');
 var createTracker = require('./progress');
+var writeThirdPartyReport = require('./third-party');
 var writeStartHere = require('./start-here');
 
 // Trackers, ad pixels, consent banners and chat widgets are dropped from the
@@ -81,6 +82,12 @@ module.exports = (socket, data, onFinished) => {
   var child = null;
   var tracker = null;
   var statsTimer = null;
+  var hostReport = null;
+
+  // The server-wide default can be overridden per download from the page, so
+  // one person can take an archive to read and the next can take everything to
+  // move a site with.
+  var keepTrackers = KEEP_TRACKERS || data.includeTrackers === true;
 
   // wget can save hundreds of files a second. Redrawing that often is wasted
   // work, so updates are coalesced onto a fixed tick.
@@ -147,14 +154,14 @@ module.exports = (socket, data, onFinished) => {
     // same-host-only behaviour rather than refusing to mirror anything.
     var domains = null;
     if (!discoveryError) {
-      var sorted = classifyHosts(hosts);
-      var wanted = KEEP_TRACKERS ? hosts : sorted.keep;
+      hostReport = classifyHosts(hosts);
+      var wanted = keepTrackers ? hosts : hostReport.keep;
       domains = discoverAssetHosts.buildDomainList(target, wanted);
       // Say what was left out. Filtering the user cannot see is the same class
       // of problem as an empty archive reported as a finished download.
-      if (!KEEP_TRACKERS && sorted.skip.length) {
+      if (!keepTrackers && hostReport.skip.length) {
         send({
-          progress: 'Skipping ' + sorted.skip.map(function (s) {
+          progress: 'Skipping ' + hostReport.skip.map(function (s) {
             return s.host + ' (' + s.why + ')';
           }).join(', ') + '\n'
         });
@@ -267,6 +274,15 @@ module.exports = (socket, data, onFinished) => {
         writeStartHere(jobDir, target);
       } catch (err) {
         console.error('Could not add START-HERE.html: ' + err.message);
+      }
+
+      // Same reasoning: a nicety must never cost someone a finished download.
+      if (hostReport) {
+        try {
+          writeThirdPartyReport(jobDir, target, hostReport, keepTrackers);
+        } catch (err) {
+          console.error('Could not add THIRD-PARTY.txt: ' + err.message);
+        }
       }
 
       var zipName = target.hostname.replace(/[^a-zA-Z0-9._-]/g, '_') + '-' + jobId;

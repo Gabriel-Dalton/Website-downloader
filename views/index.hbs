@@ -13,6 +13,17 @@
   <p class="hint">Stylesheets, scripts, images and fonts are picked up too, including
     the ones served from a CDN. Large sites can take several minutes.</p>
 
+  <label class="opt">
+    <input type="checkbox" id="includeTrackers">
+    <span>
+      <span class="opt-title">Include third-party trackers</span>
+      <span class="opt-note">Analytics, ad pixels, consent banners and chat widgets. They do
+        nothing in an offline copy, so they are left out by default. Turn this on if you are
+        moving the site somewhere else and need everything. Either way the archive lists
+        every third-party host in <code>THIRD-PARTY.txt</code>.</span>
+    </span>
+  </label>
+
   <div class="work" id="work" hidden>
     <div class="work-head">
       <span class="spinner" aria-hidden="true"></span>
@@ -38,9 +49,9 @@
         <span class="metric-k">Elapsed</span>
         <span class="metric-v" id="mElapsed">0:00</span>
       </div>
-      <div class="metric" id="mRemainWrap" hidden>
-        <span class="metric-k">Remaining</span>
-        <span class="metric-v" id="mRemain">&mdash;</span>
+      <div class="metric" id="mSpeedWrap" hidden>
+        <span class="metric-k">Speed</span>
+        <span class="metric-v" id="mSpeed">&mdash;</span>
       </div>
     </div>
 

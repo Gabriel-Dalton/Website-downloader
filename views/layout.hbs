@@ -29,8 +29,10 @@
   var mFiles      = document.getElementById('mFiles');
   var mBytes      = document.getElementById('mBytes');
   var mElapsed    = document.getElementById('mElapsed');
-  var mRemainWrap = document.getElementById('mRemainWrap');
-  var mRemain     = document.getElementById('mRemain');
+  var mSpeedWrap  = document.getElementById('mSpeedWrap');
+  var mSpeed      = document.getElementById('mSpeed');
+
+  var includeTrackers = document.getElementById('includeTrackers');
 
   var errorBox = document.getElementById('errorBox');
   var warnBox  = document.getElementById('warnBox');
@@ -61,7 +63,7 @@
     if (event.progress === 'Converting') {
       workLabel.textContent = 'Compressing the archive…';
       current.textContent = '';
-      mRemainWrap.hidden = true;
+      mSpeedWrap.hidden = true;
       barFill.className = 'bar-fill';
       return;
     }
@@ -106,9 +108,9 @@
       barFill.style.width = pct + '%';
     }
 
-    if (s.remainingMs) {
-      mRemainWrap.hidden = false;
-      mRemain.textContent = '~' + formatDuration(s.remainingMs);
+    if (s.bytesPerSec) {
+      mSpeedWrap.hidden = false;
+      mSpeed.textContent = formatBytes(s.bytesPerSec).replace(' ', '') + '/s';
     }
 
     if (s.current) current.textContent = s.current;
@@ -122,7 +124,7 @@
     warnBox.hidden = true;
     okBox.hidden = true;
     mPagesWrap.hidden = true;
-    mRemainWrap.hidden = true;
+    mSpeedWrap.hidden = true;
     mFiles.textContent = '0';
     mBytes.textContent = '0 MB';
     mElapsed.textContent = '0:00';
@@ -141,7 +143,11 @@
       mElapsed.textContent = formatDuration(Date.now() - startedAt);
     }, 1000);
 
-    socket.emit('request', { token: localStorage['token'], website: website });
+    socket.emit('request', {
+      token: localStorage['token'],
+      website: website,
+      includeTrackers: includeTrackers.checked
+    });
   }
 
   function stop() {

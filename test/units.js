@@ -63,23 +63,31 @@ check('tracks the address currently being fetched', function () {
   assert.strictEqual(t.current, 'https://example.com/two');
 });
 
-check('offers no estimate before there is a sample worth using', function () {
-  var t = createTracker(0, 80);
-  t.feed("- 'a.html' saved [10]\n");
+check('never predicts a time remaining', function () {
+  // A page-count estimate was tried and removed: pages and assets interleave,
+  // so the figure wandered up and down. Kept as a test so it does not creep
+  // back in.
+  var t = createTracker(0, 100);
+  for (var i = 0; i < 10; i++) t.feed("- 'p" + i + ".html' saved [10]\n");
   assert.strictEqual(t.snapshot(10000).remainingMs, undefined);
 });
 
-check('offers no estimate without a page total', function () {
+check('measures download speed', function () {
   var t = createTracker(0, 0);
-  for (var i = 0; i < 20; i++) t.feed("- 'p" + i + ".html' saved [10]\n");
-  assert.strictEqual(t.snapshot(60000).remainingMs, undefined);
+  t.feed("- 'a' saved [1000000]\n");
+  var s = t.snapshot(1000);
+  // A megabyte in the first second, so roughly a megabyte per second.
+  assert.ok(s.bytesPerSec > 900000 && s.bytesPerSec <= 1000000,
+            'expected about 1 MB/s, got ' + s.bytesPerSec);
 });
 
-check('estimates from the rate once there is a denominator', function () {
-  var t = createTracker(0, 100);
-  for (var i = 0; i < 10; i++) t.feed("- 'p" + i + ".html' saved [10]\n");
-  // 10 pages in 10s, 90 to go, so about 90s.
-  assert.strictEqual(t.snapshot(10000).remainingMs, 90000);
+check('smooths speed rather than jumping to each sample', function () {
+  var t = createTracker(0, 0);
+  t.feed("- 'a' saved [1000000]\n");
+  t.snapshot(1000);
+  var steady = t.snapshot(2000).bytesPerSec;   // nothing new arrived
+  assert.ok(steady < 1000000, 'a quiet second should pull the rate down');
+  assert.ok(steady > 0, 'but not straight to zero');
 });
 
 console.log('host classification');
@@ -132,6 +140,47 @@ check('reads asset hosts out of markup, ignoring plain links', function () {
   assert.ok(hosts.indexOf('img.example.org') !== -1, 'protocol-relative image host');
   assert.ok(hosts.indexOf('bg.example.io') !== -1, 'css url() host');
   assert.ok(hosts.indexOf('facebook.com') === -1, 'plain <a href> must be ignored');
+});
+
+console.log('third-party report');
+
+check('names what was kept and what was left out', function () {
+  var fs = require('fs');
+  var os = require('os');
+  var pathmod = require('path');
+  var dir = fs.mkdtempSync(pathmod.join(os.tmpdir(), 'wd-test-'));
+  var writeReport = require('../wget/third-party');
+  var sorted = {
+    keep: ['example.com', 'www.example.com', 'cdn.example.net'],
+    skip: [{ host: 'www.googletagmanager.com', why: 'tag manager' }]
+  };
+  writeReport(dir, new URL('https://example.com/'), sorted, false);
+  var text = fs.readFileSync(pathmod.join(dir, 'THIRD-PARTY.txt'), 'utf8');
+
+  assert.ok(text.indexOf('cdn.example.net') !== -1, 'lists a downloaded host');
+  assert.ok(text.indexOf('www.googletagmanager.com') !== -1, 'lists a skipped host');
+  assert.ok(text.indexOf('tag manager') !== -1, 'gives the reason');
+  assert.ok(text.indexOf('NOT DOWNLOADED') !== -1, 'says it was not fetched');
+  // The site's own hostname is not a third party.
+  assert.ok(text.indexOf('\n  example.com') === -1, 'excludes the site itself');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+check('says so when trackers were fetched anyway', function () {
+  var fs = require('fs');
+  var os = require('os');
+  var pathmod = require('path');
+  var dir = fs.mkdtempSync(pathmod.join(os.tmpdir(), 'wd-test-'));
+  var writeReport = require('../wget/third-party');
+  writeReport(dir, new URL('https://example.com/'), {
+    keep: ['example.com'],
+    skip: [{ host: 'analytics.google.com', why: 'analytics' }]
+  }, true);
+  var text = fs.readFileSync(pathmod.join(dir, 'THIRD-PARTY.txt'), 'utf8');
+  assert.ok(text.indexOf('DOES NOTHING OFFLINE') !== -1);
+  assert.ok(text.indexOf('NOT DOWNLOADED') === -1);
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 console.log('');

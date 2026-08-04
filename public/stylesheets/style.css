@@ -113,7 +113,41 @@ h1 {
 #download:hover:not(:disabled) { filter: brightness(1.08); }
 #download:disabled { opacity: .5; cursor: default; }
 
-.hint { margin: 0 0 2rem; font-size: .85rem; color: var(--muted); }
+.hint { margin: 0 0 1rem; font-size: .85rem; color: var(--muted); }
+
+/* ---------- option ---------- */
+
+.opt {
+  display: flex;
+  gap: .6rem;
+  align-items: flex-start;
+  margin: 0 0 2rem;
+  padding: .8rem .95rem;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.opt input { margin: .2rem 0 0; flex: 0 0 auto; accent-color: var(--accent); }
+
+.opt-title { display: block; font-size: .9rem; font-weight: 600; }
+
+.opt-note {
+  display: block;
+  margin-top: .2rem;
+  font-size: .8rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.opt-note code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .95em;
+  background: var(--code-bg);
+  padding: .05em .3em;
+  border-radius: 3px;
+}
 
 /* ---------- work in progress ---------- */
 
