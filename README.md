@@ -6,7 +6,7 @@ Download the complete source code of any website (including all assets) 🔨.
 There is no hosted version of this fork. It runs on your own machine, because it
 writes to disk and a media-heavy site can run to a gigabyte.
 
-![enter image description here](https://github.com/AhmadIbrahiim/Website-downloader/blob/master/public/Record.gif?raw=true)
+![enter image description here](https://github.com/Gabriel-Dalton/Website-downloader/blob/master/public/Record.gif?raw=true)
 <div align="center">
 
   <a href="">![CodeFactor](https://www.codefactor.io/repository/github/ahmadibrahiim/website-downloader/badge)</a>
