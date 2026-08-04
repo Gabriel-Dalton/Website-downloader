@@ -183,6 +183,117 @@ check('says so when trackers were fetched anyway', function () {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+console.log('lazily-loaded images');
+
+var lazyImages = require('../wget/lazy-images');
+var os = require('os');
+
+// The shape Squarespace actually ships: no src at all, the address parked on
+// data-src, and a flag telling their script the image is not ready yet.
+var LAZY_TAG = '<img data-src="https://cdn.test/photos/6.jpg" ' +
+               'data-image="https://cdn.test/photos/6.jpg" data-load="false" alt="" />';
+
+function fixture(html) {
+  var fs = require('fs');
+  var pathmod = require('path');
+  var dir = fs.mkdtempSync(pathmod.join(os.tmpdir(), 'wd-lazy-'));
+  fs.mkdirSync(pathmod.join(dir, 'site.test'), { recursive: true });
+  fs.writeFileSync(pathmod.join(dir, 'site.test', 'page.html'), html);
+  return dir;
+}
+
+check('finds an image that has no src', function () {
+  var dir = fixture(LAZY_TAG);
+  var found = lazyImages.collect(dir, ['cdn.test']);
+  assert.deepStrictEqual(found.urls, ['https://cdn.test/photos/6.jpg']);
+  require('fs').rmSync(dir, { recursive: true, force: true });
+});
+
+check('will not pull in a host the mirror was told to skip', function () {
+  var dir = fixture(LAZY_TAG);
+  assert.strictEqual(lazyImages.collect(dir, ['site.test']).urls.length, 0);
+  require('fs').rmSync(dir, { recursive: true, force: true });
+});
+
+check('treats a protocol-relative address as absolute', function () {
+  var dir = fixture('<img data-src="//cdn.test/a.jpg">');
+  assert.deepStrictEqual(lazyImages.collect(dir, ['cdn.test']).urls, ['https://cdn.test/a.jpg']);
+  require('fs').rmSync(dir, { recursive: true, force: true });
+});
+
+check('writes a src pointing at the downloaded file', function () {
+  var fs = require('fs');
+  var pathmod = require('path');
+  var dir = fixture(LAZY_TAG);
+  // Stand in for what the second wget pass fetches.
+  fs.mkdirSync(pathmod.join(dir, 'cdn.test', 'photos'), { recursive: true });
+  fs.writeFileSync(pathmod.join(dir, 'cdn.test', 'photos', '6.jpg'), 'x');
+
+  var changed = lazyImages.rewrite(dir);
+  assert.strictEqual(changed.images, 1);
+
+  var out = fs.readFileSync(pathmod.join(dir, 'site.test', 'page.html'), 'utf8');
+  assert.ok(/src="\.\.\/cdn\.test\/photos\/6\.jpg"/.test(out), 'relative src, got: ' + out);
+  assert.ok(out.indexOf('data-load="false"') === -1, 'the not-ready flag must go');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+check('leaves an image the mirror already handled alone', function () {
+  var fs = require('fs');
+  var pathmod = require('path');
+  var before = '<img src="../cdn.test/photos/6.jpg" data-src="https://cdn.test/photos/6.jpg">';
+  var dir = fixture(before);
+  fs.mkdirSync(pathmod.join(dir, 'cdn.test', 'photos'), { recursive: true });
+  fs.writeFileSync(pathmod.join(dir, 'cdn.test', 'photos', '6.jpg'), 'x');
+
+  assert.strictEqual(lazyImages.rewrite(dir).images, 0);
+  assert.strictEqual(fs.readFileSync(pathmod.join(dir, 'site.test', 'page.html'), 'utf8'), before);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+check('drops a srcset once there is a src to fall back to', function () {
+  var fs = require('fs');
+  var pathmod = require('path');
+  // The shape that made the archive twice the size it needed to be.
+  var dir = fixture('<img src="../cdn.test/a.png" sizes="240px" srcset="' +
+                    '//cdn.test/a.png?format=100w 100w, //cdn.test/a.png?format=1500w 1500w">');
+  fs.mkdirSync(pathmod.join(dir, 'cdn.test'), { recursive: true });
+  fs.writeFileSync(pathmod.join(dir, 'cdn.test', 'a.png'), 'x');
+
+  var changed = lazyImages.rewrite(dir);
+  assert.strictEqual(changed.srcsets, 1);
+  var out = fs.readFileSync(pathmod.join(dir, 'site.test', 'page.html'), 'utf8');
+  assert.ok(out.indexOf('srcset') === -1, 'srcset must go: ' + out);
+  assert.ok(out.indexOf('sizes') === -1, 'sizes goes with it');
+  assert.ok(out.indexOf('src="../cdn.test/a.png"') !== -1, 'src survives untouched');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+check('keeps a srcset when it is the only source', function () {
+  var fs = require('fs');
+  var pathmod = require('path');
+  // Stripping here would leave the image with nothing at all.
+  var dir = fixture('<img srcset="//cdn.test/a.png?format=100w 100w">');
+  assert.strictEqual(lazyImages.rewrite(dir).srcsets, 0);
+  assert.ok(fs.readFileSync(pathmod.join(dir, 'site.test', 'page.html'), 'utf8').indexOf('srcset') !== -1);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+check('the reject pattern matches variants but not the original', function () {
+  var re = new RegExp(lazyImages.REJECT_REGEX);
+  assert.ok(re.test('https://cdn.test/a.png?format=1500w'), 'matches a variant');
+  assert.ok(re.test('https://cdn.test/a.png?v=2&format=100w'), 'matches as a later parameter');
+  assert.ok(!re.test('https://cdn.test/a.png'), 'leaves the original alone');
+  assert.ok(!re.test('https://cdn.test/format-guide.html'), 'not fooled by the word in a path');
+});
+
+check('does not invent a src when the file was never fetched', function () {
+  var dir = fixture(LAZY_TAG);
+  // Nothing on disk, so a src would point at a 404 and look worse than no image.
+  assert.strictEqual(lazyImages.rewrite(dir).images, 0);
+  require('fs').rmSync(dir, { recursive: true, force: true });
+});
+
 console.log('');
 console.log(failed ? ('FAILED ' + failed + ' of ' + (passed + failed)) : ('all ' + passed + ' checks passed'));
 process.exit(failed ? 1 : 0);

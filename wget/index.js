@@ -7,6 +7,7 @@ var discoverAssetHosts = require('./discover');
 var collectSitemapUrls = require('./sitemap');
 var classifyHosts = require('./classify');
 var createTracker = require('./progress');
+var lazyImages = require('./lazy-images');
 var writeThirdPartyReport = require('./third-party');
 var writeStartHere = require('./start-here');
 
@@ -18,6 +19,8 @@ var KEEP_TRACKERS = process.env.KEEP_TRACKERS === '1';
 // Extra starting points handed to wget, written inside the job directory and
 // removed before anything is archived so it never lands in a user's zip.
 var SEED_FILE = '.wget-seeds.txt';
+var LAZY_FILE = '.wget-lazy-images.txt';
+var ALL_IMAGE_SIZES = process.env.ALL_IMAGE_SIZES === '1';
 
 /**
  * Every download gets its own directory under downloads/, which keeps two
@@ -196,6 +199,14 @@ module.exports = (socket, data, onFinished) => {
       }
     }
 
+    // Skip the fixed-width re-renders behind every responsive srcset. The
+    // originals are still fetched, and rewrite() removes the srcset afterwards
+    // so the browser uses them. Worth roughly half the download on an
+    // image-heavy site. ALL_IMAGE_SIZES=1 mirrors the site exactly as served.
+    if (!ALL_IMAGE_SIZES) {
+      args.push('--reject-regex=' + lazyImages.REJECT_REGEX, '--regex-type=posix');
+    }
+
     args.push('--no-if-modified-since', '--quota=' + QUOTA, target.href);
 
     tracker = createTracker(Date.now(), seeds ? seeds.length : 0);
@@ -262,6 +273,16 @@ module.exports = (socket, data, onFinished) => {
         return;
       }
 
+      // Pick up the images the markup does not admit to having before anything
+      // is packed up. See lazy-images.js: on a site built with Squarespace or
+      // similar, most photographs are in a data-src attribute that a mirror
+      // cannot follow, and the script that would expand them cannot run offline.
+      recoverLazyImages(domains, function () {
+        finish();
+      });
+    });
+
+    function finish() {
       flushStats();
       settled = true;
       send({ progress: 'Converting' });
@@ -303,7 +324,103 @@ module.exports = (socket, data, onFinished) => {
         }
         done();
       });
+    }
+  }
+
+  /**
+   * Fetches the lazily-referenced images, then points the markup at them.
+   *
+   * Everything here is best-effort. The mirror has already succeeded by this
+   * point, so a failure to improve it must never turn into a failed download -
+   * every path ends in next().
+   */
+  function recoverLazyImages(domains, next) {
+    var found;
+    try {
+      found = lazyImages.collect(jobDir, domains);
+    } catch (err) {
+      console.error('Could not scan for lazily-loaded images: ' + err.message);
+      return next();
+    }
+
+    // Even with nothing to fetch there is still repair work: a page can have
+    // every image present and a srcset pointing at sizes that were refused.
+    if (!found.urls.length) return repairMarkup(next);
+
+    send({ progress: 'Found ' + found.urls.length + ' images loaded by script; fetching them\n' });
+
+    var listFile = path.join(jobDir, LAZY_FILE);
+    try {
+      fs.writeFileSync(listFile, found.urls.join('\n'));
+    } catch (err) {
+      console.error('Could not write the lazy image list: ' + err.message);
+      return next();
+    }
+
+    // -nc so anything already mirrored is left alone, and no -p or recursion:
+    // these are a flat list of images, not pages to crawl from.
+    var args = ['-x', '-nc', '--no-if-modified-since', '--quota=' + QUOTA,
+                '--input-file=' + LAZY_FILE];
+
+    var pass = execFile('wget', args, { cwd: jobDir, maxBuffer: 32 * 1024 * 1024 });
+    child = pass;
+
+    pass.stderr.on('data', function (chunk) {
+      var text = chunk.toString();
+      if (/Download quota of .* EXCEEDED/i.test(text)) quotaExceeded = true;
+      if (tracker.feed(text)) scheduleStats();
     });
+
+    pass.on('error', function (err) {
+      console.error('The second pass for lazy images could not run: ' + err.message);
+      next();
+    });
+
+    pass.on('close', function () {
+      try {
+        fs.unlinkSync(listFile);
+      } catch (err) {
+        if (err.code !== 'ENOENT') console.error('Could not remove the lazy image list: ' + err.message);
+      }
+
+      if (cancelled) { abandon(); return; }
+      repairMarkup(next);
+    });
+  }
+
+  /** Points the markup at what is actually on disk. Never fatal. */
+  function repairMarkup(next) {
+    var changed;
+    try {
+      changed = lazyImages.rewrite(jobDir);
+    } catch (err) {
+      console.error('Could not repair the image markup: ' + err.message);
+      return next();
+    }
+
+    if (changed.images) {
+      send({
+        progress: 'Repaired images on ' + changed.files + ' pages (' +
+                  changed.srcsets + ' responsive sets collapsed to the original)\n'
+      });
+    }
+
+    // Then check wget's own link conversion rather than assuming it finished.
+    var relinked;
+    try {
+      relinked = lazyImages.relink(jobDir);
+    } catch (err) {
+      console.error('Could not check the converted links: ' + err.message);
+      return next();
+    }
+
+    if (relinked.links) {
+      send({
+        progress: 'Pointed ' + relinked.links + ' addresses on ' + relinked.files +
+                  ' pages at the downloaded copy\n'
+      });
+    }
+    next();
   }
 
   function timeoutMessage() {
