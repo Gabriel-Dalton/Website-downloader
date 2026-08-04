@@ -50,7 +50,7 @@ module.exports = function discoverAssetHosts(url, callback) {
     callback(err, hosts || []);
   };
 
-  fetchText(url, MAX_REDIRECTS, function (err, body, finalUrl) {
+  fetchText(url, MAX_REDIRECTS, /text\/html|application\/xhtml|text\/plain/i, function (err, body, finalUrl) {
     if (err) {
       finish(err);
       return;
@@ -75,6 +75,10 @@ module.exports = function discoverAssetHosts(url, callback) {
 
 module.exports.buildDomainList = buildDomainList;
 module.exports.collectHosts = collectHosts;
+// Shared with the sitemap reader, which needs the same bounded, redirect
+// following fetch but expects XML rather than markup.
+module.exports.fetchText = fetchText;
+module.exports.MAX_REDIRECTS = MAX_REDIRECTS;
 
 /**
  * Turns the entry URL and the discovered hosts into the value for wget's
@@ -194,7 +198,7 @@ function hostOf(reference, baseUrl) {
  * A small GET that follows redirects, gives up quickly and refuses to read an
  * unbounded body. Node's own http/https rather than a new dependency.
  */
-function fetchText(url, redirectsLeft, callback) {
+function fetchText(url, redirectsLeft, typePattern, callback) {
   var settled = false;
   var finish = function (err, body, finalUrl) {
     if (settled) return;
@@ -255,7 +259,7 @@ function fetchText(url, redirectsLeft, callback) {
         return;
       }
       settled = true; // this request is done with; the recursive call owns the callback now
-      fetchText(next, redirectsLeft - 1, callback);
+      fetchText(next, redirectsLeft - 1, typePattern, callback);
       return;
     }
 
@@ -266,9 +270,9 @@ function fetchText(url, redirectsLeft, callback) {
     }
 
     var type = String(response.headers['content-type'] || '');
-    if (type && !/text\/html|application\/xhtml|text\/plain/i.test(type)) {
+    if (type && typePattern && !typePattern.test(type)) {
       response.destroy();
-      finish(new Error('Not an HTML page'));
+      finish(new Error('Unexpected content type ' + type));
       return;
     }
 

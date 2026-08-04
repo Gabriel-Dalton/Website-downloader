@@ -51,6 +51,32 @@ This is deliberately one wget run. `--convert-links` only rewrites references
 to files fetched during the same invocation, so fetching the CDN assets in a
 second pass would leave the HTML pointing at the live internet.
 
+### Pages nothing links to
+
+A mirror follows links, so it only ever reaches pages something links to. Real
+sites routinely have pages that nothing links to any more: an old campaign page,
+a donation form only ever reached from an email, a tag listing. On
+caminoverde.org thirteen of the eighty addresses in the sitemap were unreachable
+that way, and no amount of crawling would have found them.
+
+So `robots.txt` and `sitemap.xml` are read before the mirror starts, and every
+page listed there is handed to wget as an extra starting point. Sitemap indexes
+are followed one level down. Addresses pointing at other hostnames are dropped,
+so a sitemap cannot widen what gets mirrored.
+
+### Trackers are left out
+
+The host lookup is deliberately broad, which means it also turns up analytics
+beacons, ad pixels, consent banners and chat widgets. None of those do anything
+in an offline copy: they cost download time, they pad the archive, and several
+sit there throwing console errors because the endpoint they want is
+unreachable. They are dropped from the allowlist and the page says which ones
+went. Set `KEEP_TRACKERS=1` to mirror the site exactly as served instead.
+
+The distinction is between things that change how a page looks and things that
+only report on it. `use.typekit.net` serves fonts and is kept; `p.typekit.net`
+is a usage beacon and is not.
+
 ### What you get in the zip
 
 The archive root now holds one folder per hostname, plus a `START-HERE.html`
@@ -95,6 +121,7 @@ Being honest about the limits, since the point of this is offline use:
 | `PORT` | `3000` | Port the server listens on |
 | `DOWNLOAD_QUOTA` | `2g` | Size ceiling passed to wget, so a runaway crawl cannot fill the disk |
 | `DOWNLOAD_TIMEOUT_MS` | `1800000` | How long a single download may run before it is stopped, lookup included |
+| `KEEP_TRACKERS` | unset | Set to `1` to mirror analytics, ad pixels, consent banners and chat widgets too |
 
 These are deliberately high. This is meant to be run on your own machine, so
 the limits exist to stop a runaway crawl rather than to ration a shared server.

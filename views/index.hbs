@@ -13,13 +13,39 @@
   <p class="hint">Stylesheets, scripts, images and fonts are picked up too, including
     the ones served from a CDN. Large sites can take several minutes.</p>
 
-  <div class="progress" id="progress" hidden role="progressbar" aria-label="Downloading"></div>
+  <div class="work" id="work" hidden>
+    <div class="work-head">
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="workLabel">Starting&hellip;</span>
+    </div>
 
-  <div class="stats" id="stats" hidden>
-    <span>Files fetched <b id="nFiles">0</b></span>
+    <div class="bar" id="bar"><span class="bar-fill" id="barFill"></span></div>
+
+    <div class="metrics">
+      <div class="metric" id="mPagesWrap" hidden>
+        <span class="metric-k">Pages</span>
+        <span class="metric-v" id="mPages">0</span>
+      </div>
+      <div class="metric">
+        <span class="metric-k">Files</span>
+        <span class="metric-v" id="mFiles">0</span>
+      </div>
+      <div class="metric">
+        <span class="metric-k">Downloaded</span>
+        <span class="metric-v" id="mBytes">0 MB</span>
+      </div>
+      <div class="metric">
+        <span class="metric-k">Elapsed</span>
+        <span class="metric-v" id="mElapsed">0:00</span>
+      </div>
+      <div class="metric" id="mRemainWrap" hidden>
+        <span class="metric-k">Remaining</span>
+        <span class="metric-v" id="mRemain">&mdash;</span>
+      </div>
+    </div>
+
+    <p class="current" id="current" aria-live="polite"></p>
   </div>
-
-  <p class="log" id="log" aria-live="polite"></p>
 
   <div class="msg msg-error" id="errorBox" hidden role="alert"></div>
   <div class="msg msg-warning" id="warnBox" hidden></div>

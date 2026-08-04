@@ -4,7 +4,19 @@ var fs = require('fs');
 var path = require('path');
 var archive = require('../archiver');
 var discoverAssetHosts = require('./discover');
+var collectSitemapUrls = require('./sitemap');
+var classifyHosts = require('./classify');
+var createTracker = require('./progress');
 var writeStartHere = require('./start-here');
+
+// Trackers, ad pixels, consent banners and chat widgets are dropped from the
+// allowlist by default: none of them do anything in an offline copy. Set
+// KEEP_TRACKERS=1 to mirror the page exactly as served instead.
+var KEEP_TRACKERS = process.env.KEEP_TRACKERS === '1';
+
+// Extra starting points handed to wget, written inside the job directory and
+// removed before anything is archived so it never lands in a user's zip.
+var SEED_FILE = '.wget-seeds.txt';
 
 /**
  * Every download gets its own directory under downloads/, which keeps two
@@ -67,11 +79,32 @@ module.exports = (socket, data, onFinished) => {
   var quotaExceeded = false;
   var stderrTail = [];
   var child = null;
+  var tracker = null;
+  var statsTimer = null;
+
+  // wget can save hundreds of files a second. Redrawing that often is wasted
+  // work, so updates are coalesced onto a fixed tick.
+  function scheduleStats() {
+    if (statsTimer || !tracker) return;
+    statsTimer = setTimeout(function () {
+      statsTimer = null;
+      if (!settled && tracker) send({ stats: tracker.snapshot(Date.now()) });
+    }, 400);
+  }
+
+  function flushStats() {
+    if (statsTimer) {
+      clearTimeout(statsTimer);
+      statsTimer = null;
+    }
+    if (tracker) send({ stats: tracker.snapshot(Date.now()) });
+  }
 
   var fail = (message) => {
     if (settled) return;
     settled = true;
     clearTimeout(timer);
+    if (statsTimer) { clearTimeout(statsTimer); statsTimer = null; }
     removeJobDir(jobDir);
     send({ error: message });
     done();
@@ -83,6 +116,7 @@ module.exports = (socket, data, onFinished) => {
     if (settled) return;
     settled = true;
     clearTimeout(timer);
+    if (statsTimer) { clearTimeout(statsTimer); statsTimer = null; }
     removeJobDir(jobDir);
     done();
   };
@@ -111,16 +145,53 @@ module.exports = (socket, data, onFinished) => {
     }
     // A failed lookup is not a failed download. Fall back to the old
     // same-host-only behaviour rather than refusing to mirror anything.
-    startMirror(discoveryError ? null : discoverAssetHosts.buildDomainList(target, hosts));
+    var domains = null;
+    if (!discoveryError) {
+      var sorted = classifyHosts(hosts);
+      var wanted = KEEP_TRACKERS ? hosts : sorted.keep;
+      domains = discoverAssetHosts.buildDomainList(target, wanted);
+      // Say what was left out. Filtering the user cannot see is the same class
+      // of problem as an empty archive reported as a finished download.
+      if (!KEEP_TRACKERS && sorted.skip.length) {
+        send({
+          progress: 'Skipping ' + sorted.skip.map(function (s) {
+            return s.host + ' (' + s.why + ')';
+          }).join(', ') + '\n'
+        });
+      }
+    }
+
+    // A crawl only reaches pages something links to. The sitemap is where the
+    // orphans are.
+    collectSitemapUrls(target, function (seeds) {
+      if (settled) return;
+      if (cancelled) { abandon(); return; }
+      if (timedOut) { fail(timeoutMessage()); return; }
+      startMirror(domains, seeds);
+    });
   });
 
-  function startMirror(domains) {
+  function startMirror(domains, seeds) {
     var args = ['-mkEp', '-np'];
     if (domains && domains.length) {
       args.push('-H', '--domains=' + domains.join(','));
       send({ progress: 'Including assets from: ' + domains.join(', ') + '\n' });
     }
+
+    if (seeds && seeds.length) {
+      try {
+        fs.writeFileSync(path.join(jobDir, SEED_FILE), seeds.join('\n'));
+        args.push('--input-file=' + SEED_FILE);
+        send({ progress: 'Sitemap lists ' + seeds.length + ' pages; adding them as starting points\n' });
+      } catch (err) {
+        // Seeding is an improvement, not a requirement. Mirror anyway.
+        console.error('Could not write the sitemap seed file: ' + err.message);
+      }
+    }
+
     args.push('--no-if-modified-since', '--quota=' + QUOTA, target.href);
+
+    tracker = createTracker(Date.now(), seeds ? seeds.length : 0);
 
     // execFile rather than exec: the address is passed as a separate argument
     // and never reaches a shell, so it cannot be used to run other commands.
@@ -145,7 +216,11 @@ module.exports = (socket, data, onFinished) => {
       // and nothing else would hand back a partial site that looks whole.
       if (/Download quota of .* EXCEEDED/i.test(text)) quotaExceeded = true;
       stderrTail = stderrTail.concat(text.split('\n')).slice(-60);
-      send({ progress: text });
+
+      // Counts rather than raw output. A media-heavy site produces tens of
+      // thousands of stderr lines, and forwarding every one of them floods the
+      // socket to render text nobody reads.
+      if (tracker.feed(text)) scheduleStats();
     });
 
     child.on('close', (code) => {
@@ -161,6 +236,15 @@ module.exports = (socket, data, onFinished) => {
         return;
       }
 
+      // Before anything counts the directory: the seed file is ours, not the
+      // site's. Leaving it would both ship it in the zip and make an empty
+      // download look like it had content.
+      try {
+        fs.unlinkSync(path.join(jobDir, SEED_FILE));
+      } catch (err) {
+        if (err.code !== 'ENOENT') console.error('Could not remove the seed file: ' + err.message);
+      }
+
       // Trust the filesystem rather than wget's output. wget writes nothing at
       // all for an off-site redirect, a robots.txt exclusion or a 403, and the
       // previous approach of naming the folder from the first "Resolving" line
@@ -171,6 +255,7 @@ module.exports = (socket, data, onFinished) => {
         return;
       }
 
+      flushStats();
       settled = true;
       send({ progress: 'Converting' });
 

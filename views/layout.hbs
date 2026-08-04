@@ -15,39 +15,60 @@
 <script>
   var socket = io.connect(document.URL);
 
-  var form       = document.getElementById('downloadForm');
-  var input      = document.getElementById('website');
-  var startBtn   = document.getElementById('download');
-  var progress   = document.getElementById('progress');
-  var stats      = document.getElementById('stats');
-  var nFiles     = document.getElementById('nFiles');
-  var log        = document.getElementById('log');
-  var errorBox   = document.getElementById('errorBox');
-  var warnBox    = document.getElementById('warnBox');
-  var okBox      = document.getElementById('okBox');
-  var okText     = document.getElementById('okText');
-  var saveBtn    = document.getElementById('downloadWebsite');
+  var form     = document.getElementById('downloadForm');
+  var input    = document.getElementById('website');
+  var startBtn = document.getElementById('download');
 
-  var fileCount = 0;
+  var work      = document.getElementById('work');
+  var workLabel = document.getElementById('workLabel');
+  var barFill   = document.getElementById('barFill');
+  var current   = document.getElementById('current');
+
+  var mPagesWrap  = document.getElementById('mPagesWrap');
+  var mPages      = document.getElementById('mPages');
+  var mFiles      = document.getElementById('mFiles');
+  var mBytes      = document.getElementById('mBytes');
+  var mElapsed    = document.getElementById('mElapsed');
+  var mRemainWrap = document.getElementById('mRemainWrap');
+  var mRemain     = document.getElementById('mRemain');
+
+  var errorBox = document.getElementById('errorBox');
+  var warnBox  = document.getElementById('warnBox');
+  var okBox    = document.getElementById('okBox');
+  var okText   = document.getElementById('okText');
+  var saveBtn  = document.getElementById('downloadWebsite');
+
+  // Elapsed is ticked here rather than taken from the server, so the clock
+  // keeps moving during a long fetch that produces no output at all.
+  var startedAt = 0;
+  var ticker = null;
 
   if (!localStorage['token']) localStorage['token'] = generateToken(20);
 
   socket.on(localStorage['token'], function (event) {
     if (event.error) {
-      finish();
+      stop();
       errorBox.textContent = event.error;
       errorBox.hidden = false;
       return;
     }
 
+    if (event.stats) {
+      render(event.stats);
+      return;
+    }
+
     if (event.progress === 'Converting') {
-      log.textContent = 'Compressing the archive...';
+      workLabel.textContent = 'Compressing the archive…';
+      current.textContent = '';
+      mRemainWrap.hidden = true;
+      barFill.className = 'bar-fill';
       return;
     }
 
     if (event.progress === 'Completed') {
-      finish();
-      log.textContent = '';
+      stop();
+      work.hidden = true;
       okText.textContent = 'Archive ready.';
       okBox.hidden = false;
       saveBtn.onclick = function () {
@@ -61,49 +82,92 @@
       return;
     }
 
-    // Anything else is raw wget output. Count the successful fetches and show
-    // the most recent meaningful line rather than every chunk.
-    var text = String(event.progress || '');
-    if (text.indexOf('200 OK') !== -1) {
-      fileCount++;
-      nFiles.textContent = fileCount;
-    }
-    stats.hidden = false;
-    progress.hidden = false;
-    var lines = text.split('\n');
-    for (var i = lines.length - 1; i >= 0; i--) {
-      if (lines[i].trim()) {
-        // textContent, not innerHTML: this comes from the site being
-        // downloaded and must never be parsed as markup.
-        log.textContent = lines[i].trim();
-        break;
-      }
+    // Anything else is a one-off note from the server, such as which asset
+    // hosts were included or skipped.
+    if (typeof event.progress === 'string' && event.progress.trim()) {
+      // textContent, not innerHTML: some of this echoes the site being
+      // downloaded and must never be parsed as markup.
+      current.textContent = event.progress.trim();
     }
   });
+
+  function render(s) {
+    work.hidden = false;
+    workLabel.textContent = 'Fetching files…';
+
+    mFiles.textContent = s.files.toLocaleString();
+    mBytes.textContent = formatBytes(s.bytes);
+
+    if (s.totalPages) {
+      mPagesWrap.hidden = false;
+      mPages.textContent = s.pages.toLocaleString() + ' / ' + s.totalPages.toLocaleString();
+      var pct = Math.max(2, Math.min(100, Math.round(s.pages / s.totalPages * 100)));
+      barFill.className = 'bar-fill known';
+      barFill.style.width = pct + '%';
+    }
+
+    if (s.remainingMs) {
+      mRemainWrap.hidden = false;
+      mRemain.textContent = '~' + formatDuration(s.remainingMs);
+    }
+
+    if (s.current) current.textContent = s.current;
+  }
 
   function startDownload() {
     var website = input.value.trim();
     if (!website) { input.focus(); return; }
 
-    fileCount = 0;
-    nFiles.textContent = '0';
-    log.textContent = 'Starting...';
     errorBox.hidden = true;
     warnBox.hidden = true;
     okBox.hidden = true;
-    stats.hidden = true;
-    progress.hidden = false;
+    mPagesWrap.hidden = true;
+    mRemainWrap.hidden = true;
+    mFiles.textContent = '0';
+    mBytes.textContent = '0 MB';
+    mElapsed.textContent = '0:00';
+    current.textContent = '';
+    barFill.className = 'bar-fill';
+    barFill.style.width = '';
+    workLabel.textContent = 'Looking up where the assets live…';
+    work.hidden = false;
+
     startBtn.disabled = true;
-    startBtn.textContent = 'Working...';
+    startBtn.textContent = 'Working…';
+
+    startedAt = Date.now();
+    clearInterval(ticker);
+    ticker = setInterval(function () {
+      mElapsed.textContent = formatDuration(Date.now() - startedAt);
+    }, 1000);
 
     socket.emit('request', { token: localStorage['token'], website: website });
   }
 
-  function finish() {
-    progress.hidden = true;
+  function stop() {
+    clearInterval(ticker);
+    ticker = null;
     startBtn.disabled = false;
     startBtn.textContent = 'Download';
   }
+
+  function formatBytes(n) {
+    if (!n) return '0 MB';
+    if (n < 1048576) return (n / 1024).toFixed(0) + ' KB';
+    if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
+    return (n / 1073741824).toFixed(2) + ' GB';
+  }
+
+  function formatDuration(ms) {
+    var total = Math.max(0, Math.round(ms / 1000));
+    var h = Math.floor(total / 3600);
+    var m = Math.floor((total % 3600) / 60);
+    var s = total % 60;
+    if (h) return h + ':' + pad(m) + ':' + pad(s);
+    return m + ':' + pad(s);
+  }
+
+  function pad(n) { return n < 10 ? '0' + n : String(n); }
 
   startBtn.onclick = startDownload;
   // Without this, Enter submits the form and navigates away from the page.
@@ -113,7 +177,8 @@
   });
 
   socket.on('disconnect', function () {
-    finish();
+    stop();
+    work.hidden = true;
     errorBox.textContent = 'Lost the connection to the server. Is it still running?';
     errorBox.hidden = false;
   });

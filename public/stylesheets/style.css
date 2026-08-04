@@ -115,67 +115,110 @@ h1 {
 
 .hint { margin: 0 0 2rem; font-size: .85rem; color: var(--muted); }
 
-/* ---------- progress ---------- */
+/* ---------- work in progress ---------- */
 
-.progress {
-  height: 3px;
-  margin-bottom: 1.25rem;
+.work {
+  margin: 0 0 1.25rem;
+  padding: 1rem 1.15rem 1.1rem;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+
+.work[hidden] { display: none; }
+
+.work-head {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  margin-bottom: .85rem;
+  font-size: .95rem;
+  font-weight: 600;
+}
+
+.spinner {
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid var(--rule);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.bar {
+  height: 4px;
+  margin-bottom: 1rem;
   border-radius: 2px;
   background: var(--rule);
   overflow: hidden;
 }
 
-.progress[hidden] { display: none; }
-
-.progress::after {
-  content: '';
+.bar-fill {
   display: block;
-  width: 40%;
+  width: 35%;
   height: 100%;
   border-radius: 2px;
   background: var(--accent);
-  animation: sweep 1.4s ease-in-out infinite;
+  animation: sweep 1.5s ease-in-out infinite;
+}
+
+/* Once a page total is known the bar stops guessing and tracks it. */
+.bar-fill.known {
+  animation: none;
+  transition: width .4s ease;
 }
 
 @keyframes sweep {
   0%   { transform: translateX(-100%); }
-  100% { transform: translateX(350%); }
+  100% { transform: translateX(320%); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .progress::after { animation: none; width: 100%; opacity: .6; }
+  .spinner { animation-duration: 2s; }
+  .bar-fill { animation: none; width: 100%; opacity: .5; }
+  .bar-fill.known { opacity: 1; }
 }
 
-/* ---------- status ---------- */
-
-.stats {
+.metrics {
   display: flex;
-  gap: 1.5rem;
-  margin-bottom: .75rem;
-  font-size: .85rem;
+  flex-wrap: wrap;
+  gap: 1.4rem;
+  margin-bottom: .85rem;
+}
+
+.metric { display: flex; flex-direction: column; gap: .1rem; }
+.metric[hidden] { display: none; }
+
+.metric-k {
+  font-size: .68rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
   color: var(--muted);
 }
 
-.stats[hidden] { display: none; }
+.metric-v {
+  font-size: .95rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 
-.stats b { color: var(--fg); font-variant-numeric: tabular-nums; }
-
-.log {
-  margin: 0 0 1rem;
-  padding: .7rem .9rem;
-  min-height: 2.6rem;
+.current {
+  margin: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: .78rem;
+  font-size: .74rem;
   line-height: 1.5;
   color: var(--muted);
-  background: var(--code-bg);
-  border-radius: 6px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-x: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
 }
 
-.log:empty { display: none; }
+.current:empty { display: none; }
 
 /* ---------- messages ---------- */
 
