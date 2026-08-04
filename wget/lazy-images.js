@@ -203,9 +203,26 @@ function localPathFor(root, url) {
  *
  * @returns {{files: number, links: number}}
  */
-function relink(root) {
+function relink(root, allowedHosts) {
   var changedFiles = 0;
   var changedLinks = 0;
+
+  // Addresses on a host the mirror was told to cover, which nonetheless have
+  // no file underneath the archive. These are the genuine holes: something the
+  // download was supposed to capture and did not. Silence about them is how an
+  // incomplete archive passes for a complete one.
+  var allowed = Object.create(null);
+  (allowedHosts || []).forEach(function (h) { allowed[String(h).toLowerCase()] = true; });
+  var missing = Object.create(null);
+
+  function noteMissing(url) {
+    if (!allowedHosts || !allowedHosts.length) return;
+    var host;
+    try { host = new URL(url).hostname.toLowerCase(); } catch (err) { return; }
+    if (!allowed[host]) return;             // somewhere we never meant to fetch
+    if (Object.keys(missing).length > 500) return;
+    missing[url.split('#')[0]] = true;
+  }
 
   // Stylesheets matter as much as pages here. @font-face lives in CSS, so a
   // stylesheet left pointing at the web costs the site its typefaces - and a
@@ -219,7 +236,7 @@ function relink(root) {
 
     function toLocal(url) {
       var local = localPathFor(root, url);
-      if (!local) return null;
+      if (!local) { noteMissing(url); return null; }
       return path.relative(dir, local).split(path.sep).join('/');
     }
 
@@ -254,8 +271,66 @@ function relink(root) {
     }
   });
 
-  return { files: changedFiles, links: changedLinks };
+  return {
+    files: changedFiles,
+    links: changedLinks,
+    missing: Object.keys(missing).sort()
+  };
 }
+
+/**
+ * Records the addresses the mirror was meant to hold and does not.
+ *
+ * Worth writing down because the reasons are rarely obvious and never
+ * announced. The one that cost this the site's typeface: Adobe Fonts serves
+ * its loader from a 513-character address, and Windows will not accept a path
+ * that long, so wget failed to write it and said nothing. The archive looked
+ * complete and rendered in a fallback serif.
+ */
+function writeMissingReport(root, missing) {
+  if (!missing || !missing.length) return null;
+
+  var longOnes = missing.filter(function (u) { return u.length > 200; });
+  var lines = [];
+
+  lines.push('Files this archive is missing');
+  lines.push('=============================');
+  lines.push('');
+  lines.push('Addresses on hosts the download was set up to cover, which have no');
+  lines.push('file here. Pages referring to them will reach for the live site.');
+  lines.push('');
+
+  if (longOnes.length) {
+    lines.push('Too long to save (' + longOnes.length + ')');
+    lines.push('-----------------------');
+    lines.push('Windows limits a path to 260 characters. Anything longer cannot be');
+    lines.push('written, whatever it contains. Running the download on Linux or macOS,');
+    lines.push('or enabling long paths on Windows, will capture these.');
+    lines.push('');
+    longOnes.slice(0, 40).forEach(function (u) {
+      lines.push('  [' + u.length + ' chars] ' + u.slice(0, 110) + '...');
+    });
+    if (longOnes.length > 40) lines.push('  ...and ' + (longOnes.length - 40) + ' more');
+    lines.push('');
+  }
+
+  var rest = missing.filter(function (u) { return u.length <= 200; });
+  if (rest.length) {
+    lines.push('Not downloaded (' + rest.length + ')');
+    lines.push('----------------------');
+    lines.push('Usually a file the site builds an address for in JavaScript, which a');
+    lines.push('mirror cannot see, or one the server refused.');
+    lines.push('');
+    rest.slice(0, 60).forEach(function (u) { lines.push('  ' + u); });
+    if (rest.length > 60) lines.push('  ...and ' + (rest.length - 60) + ' more');
+    lines.push('');
+  }
+
+  fs.writeFileSync(path.join(root, MISSING_FILENAME), lines.join('\n'), 'utf8');
+  return MISSING_FILENAME;
+}
+
+var MISSING_FILENAME = 'MISSING.txt';
 
 function eachHtmlFile(dir, fn) {
   eachFile(dir, /\.x?html?$/i, fn);
@@ -352,7 +427,9 @@ module.exports = {
   rewrite: rewrite,
   relink: relink,
   injectReveal: injectReveal,
+  writeMissingReport: writeMissingReport,
   localPathFor: localPathFor,
+  MISSING_FILENAME: MISSING_FILENAME,
   ATTRS: ATTRS,
   REJECT_REGEX: REJECT_REGEX,
   REVEAL_MARK: REVEAL_MARK

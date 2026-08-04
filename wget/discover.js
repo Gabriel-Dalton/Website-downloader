@@ -73,8 +73,65 @@ module.exports = function discoverAssetHosts(url, callback) {
   });
 };
 
+/**
+ * The same lookup, across several pages instead of one.
+ *
+ * Looking only at the entry page is a real weakness. caminoverde.org answers
+ * its front page with a language chooser: 97 characters of text, five images,
+ * and none of the hosts the rest of the site is built from. A host missed here
+ * is not in --domains, so every asset on it is skipped for the whole download -
+ * the site mirrors as bare HTML and the cause is nowhere in the output.
+ *
+ * Pages that are already known (from the sitemap) are cheap to check and make
+ * the allowlist reflect the site rather than whatever the front door happens to
+ * be. Failures are ignored: this only ever adds hosts, so a page that will not
+ * load costs nothing but the hosts it would have contributed.
+ *
+ * @param {URL} url the entry point
+ * @param {string[]} extraPages absolute addresses to sample as well
+ * @param {number} limit how many of them to look at
+ * @param {function(Error, string[])} callback
+ */
+function discoverAcross(url, extraPages, limit, callback) {
+  var pages = [url];
+  for (var i = 0; i < (extraPages || []).length && pages.length <= limit; i++) {
+    try {
+      var candidate = new URL(extraPages[i]);
+      if (candidate.href !== url.href) pages.push(candidate);
+    } catch (err) { /* not an address we can use */ }
+  }
+
+  var hosts = [];
+  var seen = Object.create(null);
+  var pending = pages.length;
+  var firstError = null;
+
+  pages.forEach(function (page, index) {
+    fetchText(page, MAX_REDIRECTS, /text\/html|application\/xhtml|text\/plain/i, function (err, body, finalUrl) {
+      if (!err && body) {
+        try {
+          collectHosts(body, finalUrl).forEach(function (host) {
+            if (!seen[host]) { seen[host] = true; hosts.push(host); }
+          });
+        } catch (parseError) {
+          if (index === 0) firstError = parseError;
+        }
+      } else if (index === 0) {
+        // Only the entry page failing is worth reporting; it is the one the
+        // caller falls back on when there is nothing to allow.
+        firstError = err || new Error('The page came back empty');
+      }
+
+      if (--pending === 0) {
+        callback(hosts.length ? null : firstError, hosts);
+      }
+    });
+  });
+}
+
 module.exports.buildDomainList = buildDomainList;
 module.exports.collectHosts = collectHosts;
+module.exports.discoverAcross = discoverAcross;
 // Shared with the sitemap reader, which needs the same bounded, redirect
 // following fetch but expects XML rather than markup.
 module.exports.fetchText = fetchText;

@@ -279,6 +279,58 @@ check('keeps a srcset when it is the only source', function () {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+check('reports an in-scope address it could not find on disk', function () {
+  var fs = require('fs');
+  var dir = fixture('<script src="https://cdn.test/universal/app.js"></script>');
+  var r = lazyImages.relink(dir, ['cdn.test']);
+  assert.deepStrictEqual(r.missing, ['https://cdn.test/universal/app.js']);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+check('does not report a host the download never covered', function () {
+  var fs = require('fs');
+  // An outbound link to someone else's site is not a hole in the archive.
+  var dir = fixture('<a href="https://facebook.com/page">social</a>');
+  assert.deepStrictEqual(lazyImages.relink(dir, ['cdn.test']).missing, []);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+check('reports nothing once the file is present', function () {
+  var fs = require('fs');
+  var pathmod = require('path');
+  var dir = fixture('<script src="https://cdn.test/app.js"></script>');
+  fs.mkdirSync(pathmod.join(dir, 'cdn.test'), { recursive: true });
+  fs.writeFileSync(pathmod.join(dir, 'cdn.test', 'app.js'), 'x');
+  var r = lazyImages.relink(dir, ['cdn.test']);
+  assert.deepStrictEqual(r.missing, []);
+  assert.strictEqual(r.links, 1);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+check('the missing report separates addresses too long to save', function () {
+  var fs = require('fs');
+  var pathmod = require('path');
+  var os = require('os');
+  var dir = fs.mkdtempSync(pathmod.join(os.tmpdir(), 'wd-missing-'));
+  var longUrl = 'https://use.typekit.net/ik/' + new Array(500).join('a') + '.js';
+  lazyImages.writeMissingReport(dir, [longUrl, 'https://cdn.test/app.js']);
+  var text = fs.readFileSync(pathmod.join(dir, lazyImages.MISSING_FILENAME), 'utf8');
+  assert.ok(text.indexOf('Too long to save (1)') !== -1, 'counts the long one');
+  assert.ok(text.indexOf('Not downloaded (1)') !== -1, 'counts the ordinary one');
+  assert.ok(text.indexOf('260 characters') !== -1, 'explains the limit');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+check('writes no report when nothing is missing', function () {
+  var fs = require('fs');
+  var pathmod = require('path');
+  var os = require('os');
+  var dir = fs.mkdtempSync(pathmod.join(os.tmpdir(), 'wd-missing-'));
+  assert.strictEqual(lazyImages.writeMissingReport(dir, []), null);
+  assert.ok(!fs.existsSync(pathmod.join(dir, lazyImages.MISSING_FILENAME)));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 check('adds the reveal snippet once, before the closing body tag', function () {
   var fs = require('fs');
   var pathmod = require('path');

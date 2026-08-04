@@ -112,7 +112,7 @@ Being honest about the limits, since the point of this is offline use:
 - `cd Website-downloader`
 - `$ npm install`
 - `$ npm start`
-- `http://localhost:3000/`
+- `http://localhost:3300/`
 
 ### Optional settings
 

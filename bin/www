@@ -12,7 +12,21 @@ var http = require('http');
  * Get port from environment and store in Express.
  */
 
-var port = normalizePort(process.env.PORT || '3000');
+// 3000 is reserved for the Just Us platform — its SSO callback is registered
+// as http://localhost:3000/verify, so sign-in breaks on any other port and a
+// squatter here silently pushes Next.js to 3001. Refuse 3000 even when PORT
+// asks for it explicitly: this server also serves crawled sites, which leaves
+// their cookies and service workers on whatever origin it occupies.
+var RESERVED_PORT = 3000;
+var FALLBACK_PORT = 3300;
+var port = normalizePort(process.env.PORT || String(FALLBACK_PORT));
+if (port === RESERVED_PORT) {
+  console.warn(
+    '[www] port ' + RESERVED_PORT + ' is reserved for the Just Us platform; using ' +
+    FALLBACK_PORT + ' instead.'
+  );
+  port = FALLBACK_PORT;
+}
 app.set('port', port);
 
 /**

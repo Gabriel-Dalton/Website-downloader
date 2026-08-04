@@ -22,6 +22,17 @@ var SEED_FILE = '.wget-seeds.txt';
 var LAZY_FILE = '.wget-lazy-images.txt';
 var ALL_IMAGE_SIZES = process.env.ALL_IMAGE_SIZES === '1';
 
+// How many pages the asset lookup reads before the mirror starts, the entry
+// page included. Enough that a thin front page does not decide the allowlist
+// for the whole site, few enough that nobody waits on it.
+var HOST_SAMPLE_PAGES = 4;
+
+// Nothing new arriving for this long means the mirror has wedged rather than
+// finished. Set generously above the pause one large file or a slow server can
+// produce, so a working download is never cut short.
+var STALL_MS = Number(process.env.DOWNLOAD_STALL_MS) || 120 * 1000;
+var STALL_CHECK_MS = 15 * 1000;
+
 /**
  * Every download gets its own directory under downloads/, which keeps two
  * people downloading the same site from writing into each other's files and
@@ -86,6 +97,10 @@ module.exports = (socket, data, onFinished) => {
   var tracker = null;
   var statsTimer = null;
   var hostReport = null;
+  var mirrorDomains = null;
+  var mirrorFinished = false;
+  var stallTimer = null;
+  var stalled = false;
 
   // The server-wide default can be overridden per download from the page, so
   // one person can take an archive to read and the next can take everything to
@@ -115,6 +130,7 @@ module.exports = (socket, data, onFinished) => {
     settled = true;
     clearTimeout(timer);
     if (statsTimer) { clearTimeout(statsTimer); statsTimer = null; }
+    if (stallTimer) { clearInterval(stallTimer); stallTimer = null; }
     removeJobDir(jobDir);
     send({ error: message });
     done();
@@ -127,6 +143,7 @@ module.exports = (socket, data, onFinished) => {
     settled = true;
     clearTimeout(timer);
     if (statsTimer) { clearTimeout(statsTimer); statsTimer = null; }
+    if (stallTimer) { clearInterval(stallTimer); stallTimer = null; }
     removeJobDir(jobDir);
     done();
   };
@@ -134,6 +151,16 @@ module.exports = (socket, data, onFinished) => {
   // The clock covers the whole job, discovery included, so the ceiling the
   // operator configured is the real one.
   var timer = setTimeout(() => {
+    // Once the mirror itself is done the site is on disk, and everything still
+    // running is only trying to improve it. Throwing that away over a deadline
+    // would be the wrong trade, so the repairs are abandoned and the archive is
+    // built from what is there.
+    if (mirrorFinished) {
+      if (child) { try { child.kill(); } catch (err) { /* already gone */ } }
+      send({ progress: 'Taking longer than expected; packaging what has been downloaded\n' });
+      finishAfterMirror();
+      return;
+    }
     timedOut = true;
     if (child) {
       child.kill();
@@ -142,46 +169,53 @@ module.exports = (socket, data, onFinished) => {
     }
   }, TIMEOUT_MS);
 
-  send({ progress: 'Looking up where ' + target.hostname + ' keeps its assets\n' });
-  discoverAssetHosts(target, (discoveryError, hosts) => {
-    if (settled) return;
-    if (cancelled) {
-      abandon();
-      return;
-    }
-    if (timedOut) {
-      fail(timeoutMessage());
-      return;
-    }
-    // A failed lookup is not a failed download. Fall back to the old
-    // same-host-only behaviour rather than refusing to mirror anything.
-    var domains = null;
-    if (!discoveryError) {
-      hostReport = classifyHosts(hosts);
-      var wanted = keepTrackers ? hosts : hostReport.keep;
-      domains = discoverAssetHosts.buildDomainList(target, wanted);
-      // Say what was left out. Filtering the user cannot see is the same class
-      // of problem as an empty archive reported as a finished download.
-      if (!keepTrackers && hostReport.skip.length) {
-        send({
-          progress: 'Skipping ' + hostReport.skip.map(function (s) {
-            return s.host + ' (' + s.why + ')';
-          }).join(', ') + '\n'
-        });
-      }
-    }
+  // Set by startMirror so the deadline above can reach the archive step.
+  var finishAfterMirror = function () { /* replaced once the mirror starts */ };
 
-    // A crawl only reaches pages something links to. The sitemap is where the
-    // orphans are.
-    collectSitemapUrls(target, function (seeds) {
+  // The sitemap is read first so the asset lookup has more than the front page
+  // to go on. A crawl only reaches pages something links to; the sitemap is
+  // where the orphans are, and it doubles as a list of pages worth sampling.
+  collectSitemapUrls(target, function (seeds) {
+    if (settled) return;
+    if (cancelled) { abandon(); return; }
+    if (timedOut) { fail(timeoutMessage()); return; }
+
+    send({ progress: 'Looking up where ' + target.hostname + ' keeps its assets\n' });
+    discoverAssetHosts.discoverAcross(target, seeds, HOST_SAMPLE_PAGES, (discoveryError, hosts) => {
       if (settled) return;
-      if (cancelled) { abandon(); return; }
-      if (timedOut) { fail(timeoutMessage()); return; }
+      if (cancelled) {
+        abandon();
+        return;
+      }
+      if (timedOut) {
+        fail(timeoutMessage());
+        return;
+      }
+      // A failed lookup is not a failed download. Fall back to the old
+      // same-host-only behaviour rather than refusing to mirror anything.
+      var domains = null;
+      if (!discoveryError) {
+        hostReport = classifyHosts(hosts);
+        var wanted = keepTrackers ? hosts : hostReport.keep;
+        domains = discoverAssetHosts.buildDomainList(target, wanted);
+        // Say what was left out. Filtering the user cannot see is the same class
+        // of problem as an empty archive reported as a finished download.
+        if (!keepTrackers && hostReport.skip.length) {
+          send({
+            progress: 'Skipping ' + hostReport.skip.map(function (s) {
+              return s.host + ' (' + s.why + ')';
+            }).join(', ') + '\n'
+          });
+        }
+      }
+
       startMirror(domains, seeds);
     });
   });
 
   function startMirror(domains, seeds) {
+    mirrorDomains = domains;
+    finishAfterMirror = function () { finish(); };
     var args = ['-mkEp', '-np'];
     if (domains && domains.length) {
       args.push('-H', '--domains=' + domains.join(','));
@@ -207,9 +241,70 @@ module.exports = (socket, data, onFinished) => {
       args.push('--reject-regex=' + lazyImages.REJECT_REGEX, '--regex-type=posix');
     }
 
+    // --trust-server-names would remove a real duplicate: the allowlist has to
+    // hold both the apex and its www twin so a redirect between them is not
+    // treated as leaving the site, and the same page can then be written under
+    // both names. caminoverde.org came back as 79 pages plus 78 more.
+    //
+    // It is left off for now because it was not possible to separate its
+    // effects from this site's own behaviour: runs stalled part way through
+    // both with and without it. The stall watchdog below is the thing that
+    // actually made downloads finish, and the duplication is wasteful rather
+    // than harmful. Worth revisiting against a site that mirrors cleanly.
+
+    // Bound every request. wget's defaults are a 900 second read timeout and
+    // twenty attempts, so one asset whose server accepts the connection and
+    // then stops talking holds the whole mirror open for hours: the process is
+    // alive, the file count never moves, and nothing in the output says why.
+    // A download of caminoverde.org stalled here at 766 files with no
+    // explanation until the process was inspected directly.
+    args.push('--timeout=30', '--tries=3', '--waitretry=2');
+
     args.push('--no-if-modified-since', '--quota=' + QUOTA, target.href);
 
     tracker = createTracker(Date.now(), seeds ? seeds.length : 0);
+
+    // A watchdog on actual progress, not on wget's own promises.
+    //
+    // --timeout is not enough. Mirroring caminoverde.org, wget settled with two
+    // established TLS connections to the CDN that simply stopped sending: no
+    // bytes, no CPU, no output, and the request timeout never fired. The job
+    // sat like that indefinitely with the site already downloaded, because
+    // nothing was watching whether the download was still moving.
+    //
+    // So progress is measured here. If nothing new arrives for long enough,
+    // wget is stopped and what has been collected goes on to be archived,
+    // which is a far better answer than waiting forever for one asset.
+    // Progress is judged by what reaches the disk, not by what wget says it is
+    // doing. Those are not the same thing: a mirror caught in a redirect loop
+    // reports a steady stream of fetches while writing nothing new, so a
+    // watchdog reading only wget's output sees a healthy download forever.
+    var lastCount = -1;
+    var lastMovedAt = Date.now();
+    stallTimer = setInterval(function () {
+      if (!tracker || settled) return;
+      var onDisk;
+      try {
+        onDisk = countFiles(jobDir);
+      } catch (err) {
+        return;                       // unreadable for a moment; try again next tick
+      }
+      if (onDisk !== lastCount) {
+        lastCount = onDisk;
+        lastMovedAt = Date.now();
+        return;
+      }
+      if (Date.now() - lastMovedAt < STALL_MS) return;
+
+      clearInterval(stallTimer);
+      stallTimer = null;
+      send({
+        progress: 'No new files for ' + Math.round(STALL_MS / 1000) +
+                  ' seconds; stopping the download and keeping what arrived\n'
+      });
+      stalled = true;
+      if (child) { try { child.kill(); } catch (err) { /* already gone */ } }
+    }, STALL_CHECK_MS);
 
     // execFile rather than exec: the address is passed as a separate argument
     // and never reaches a shell, so it cannot be used to run other commands.
@@ -243,7 +338,12 @@ module.exports = (socket, data, onFinished) => {
 
     child.on('close', (code) => {
       if (settled) return;
-      clearTimeout(timer);
+      if (stallTimer) { clearInterval(stallTimer); stallTimer = null; }
+      // The overall timer deliberately keeps running. Everything after this
+      // point - a second fetch for lazily loaded images, then the markup
+      // repairs - is still work that can hang, and clearing the deadline here
+      // left a stalled job with nothing to stop it. It is cleared in finish()
+      // and in fail() instead, once there is an outcome.
 
       if (cancelled) {
         abandon();
@@ -253,6 +353,8 @@ module.exports = (socket, data, onFinished) => {
         fail(timeoutMessage());
         return;
       }
+
+      mirrorFinished = true;
 
       // Before anything counts the directory: the seed file is ours, not the
       // site's. Leaving it would both ship it in the zip and make an empty
@@ -283,6 +385,8 @@ module.exports = (socket, data, onFinished) => {
     });
 
     function finish() {
+      if (settled) return;
+      clearTimeout(timer);
       flushStats();
       settled = true;
       send({ progress: 'Converting' });
@@ -318,6 +422,16 @@ module.exports = (socket, data, onFinished) => {
             warning: 'This archive is incomplete. The download stopped at the ' + QUOTA +
                      ' size limit, so some pages and assets are missing. Raise ' +
                      'DOWNLOAD_QUOTA on the server to capture the whole site.'
+          });
+        } else if (stalled) {
+          // Saying "Completed" alone here would be the same lie as reporting an
+          // empty archive as a finished download.
+          send({
+            progress: 'Completed',
+            file: name,
+            warning: 'This archive may be incomplete. The site stopped responding part ' +
+                     'way through and the download was ended so the files already ' +
+                     'collected were not lost. Running it again usually picks up the rest.'
           });
         } else {
           send({ progress: 'Completed', file: name });
@@ -359,8 +473,13 @@ module.exports = (socket, data, onFinished) => {
 
     // -nc so anything already mirrored is left alone, and no -p or recursion:
     // these are a flat list of images, not pages to crawl from.
+    //
+    // The timeouts are not decoration. wget defaults to a 900 second read
+    // timeout and twenty attempts, so one address that accepts a connection
+    // and then goes quiet can hold this stage open for hours. The mirror has
+    // already succeeded by now; no single image is worth waiting on.
     var args = ['-x', '-nc', '--no-if-modified-since', '--quota=' + QUOTA,
-                '--input-file=' + LAZY_FILE];
+                '--timeout=20', '--tries=2', '--input-file=' + LAZY_FILE];
 
     var pass = execFile('wget', args, { cwd: jobDir, maxBuffer: 32 * 1024 * 1024 });
     child = pass;
@@ -390,6 +509,7 @@ module.exports = (socket, data, onFinished) => {
 
   /** Points the markup at what is actually on disk. Never fatal. */
   function repairMarkup(next) {
+    send({ progress: 'Checking the copy is self-contained\n' });
     var changed;
     try {
       changed = lazyImages.rewrite(jobDir);
@@ -408,7 +528,7 @@ module.exports = (socket, data, onFinished) => {
     // Then check wget's own link conversion rather than assuming it finished.
     var relinked;
     try {
-      relinked = lazyImages.relink(jobDir);
+      relinked = lazyImages.relink(jobDir, mirrorDomains);
     } catch (err) {
       console.error('Could not check the converted links: ' + err.message);
       return next();
@@ -419,6 +539,19 @@ module.exports = (socket, data, onFinished) => {
         progress: 'Pointed ' + relinked.links + ' addresses on ' + relinked.files +
                   ' pages at the downloaded copy\n'
       });
+    }
+
+    // Say what is genuinely absent rather than letting the gaps pass unmentioned.
+    if (relinked.missing && relinked.missing.length) {
+      try {
+        lazyImages.writeMissingReport(jobDir, relinked.missing);
+        send({
+          progress: relinked.missing.length + ' files could not be saved; ' +
+                    'they are listed in ' + lazyImages.MISSING_FILENAME + '\n'
+        });
+      } catch (err) {
+        console.error('Could not write the missing-files report: ' + err.message);
+      }
     }
 
     // Last, make sure nothing downloaded is left invisible.
@@ -491,6 +624,28 @@ function explainFailure(lines, exitCode) {
  * this runs synchronously inside an event handler, so every extra readdir
  * stalls every other connected user.
  */
+/**
+ * How many files exist under a directory. Used by the stall watchdog, which
+ * needs a measure of real progress rather than of wget's own reporting.
+ */
+function countFiles(directory) {
+  var total = 0;
+  var entries;
+  try {
+    entries = fs.readdirSync(directory, { withFileTypes: true });
+  } catch (err) {
+    return 0;
+  }
+  for (var i = 0; i < entries.length; i++) {
+    if (entries[i].isDirectory()) {
+      total += countFiles(path.join(directory, entries[i].name));
+    } else {
+      total++;
+    }
+  }
+  return total;
+}
+
 function containsFiles(directory) {
   var entries;
   try {
