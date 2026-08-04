@@ -279,6 +279,26 @@ check('keeps a srcset when it is the only source', function () {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+check('adds the reveal snippet once, before the closing body tag', function () {
+  var fs = require('fs');
+  var pathmod = require('path');
+  var dir = fixture('<body><img src="a.jpg"></body>');
+  assert.strictEqual(lazyImages.injectReveal(dir).files, 1);
+  var page = pathmod.join(dir, 'site.test', 'page.html');
+  var out = fs.readFileSync(page, 'utf8');
+  assert.ok(out.indexOf(lazyImages.REVEAL_MARK) !== -1, 'snippet present');
+  assert.ok(out.indexOf(lazyImages.REVEAL_MARK) < out.indexOf('</body>'), 'sits before </body>');
+  // Running the repair twice must not stack copies.
+  assert.strictEqual(lazyImages.injectReveal(dir).files, 0);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+check('skips a fragment with no body tag', function () {
+  var dir = fixture('<div>partial</div>');
+  assert.strictEqual(lazyImages.injectReveal(dir).files, 0);
+  require('fs').rmSync(dir, { recursive: true, force: true });
+});
+
 check('the reject pattern matches variants but not the original', function () {
   var re = new RegExp(lazyImages.REJECT_REGEX);
   assert.ok(re.test('https://cdn.test/a.png?format=1500w'), 'matches a variant');

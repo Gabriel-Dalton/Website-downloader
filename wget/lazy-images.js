@@ -305,11 +305,55 @@ function hostOf(url) {
  */
 var REJECT_REGEX = '[?&]format=[0-9]+w';
 
+// Marks the snippet below so a second run does not add it twice.
+var REVEAL_MARK = 'website-downloader-reveal';
+
+/**
+ * Shows images that downloaded, laid out, and then stayed invisible.
+ *
+ * Gallery scripts commonly render an image at opacity zero and fade it in once
+ * their own loader reports it ready. Offline that report never arrives, so the
+ * page ends up with a correctly sized, fully decoded photograph at zero
+ * opacity - a block of white space where the content is. It looks like the
+ * mirror missed the images when in fact it has every one of them.
+ *
+ * The snippet only touches an image that has actually decoded and is still at
+ * zero opacity, so a fade that is working is left to finish on its own. It runs
+ * twice because galleries are often built after the first pass.
+ */
+function injectReveal(root) {
+  var snippet = '<script>/*' + REVEAL_MARK + '*/(function(){' +
+    'function r(){var i=document.images,n=0;' +
+    'for(var k=0;k<i.length;k++){var e=i[k];' +
+    'if(e.naturalWidth>0&&getComputedStyle(e).opacity==="0"){' +
+    'e.style.setProperty("opacity","1","important");n++;}}return n;}' +
+    'function go(){setTimeout(r,1200);setTimeout(r,4000);}' +
+    'if(document.readyState==="loading")' +
+    'document.addEventListener("DOMContentLoaded",go);else go();' +
+    '})();<\/script>';
+
+  var files = 0;
+  eachHtmlFile(root, function (file) {
+    var html = readIfText(file);
+    if (html === null || html.indexOf(REVEAL_MARK) !== -1) return;
+    if (!/<\/body>/i.test(html)) return;
+    try {
+      fs.writeFileSync(file, html.replace(/<\/body>/i, snippet + '</body>'));
+      files++;
+    } catch (err) {
+      console.error('Could not add the reveal snippet to ' + file + ': ' + err.message);
+    }
+  });
+  return { files: files };
+}
+
 module.exports = {
   collect: collect,
   rewrite: rewrite,
   relink: relink,
+  injectReveal: injectReveal,
   localPathFor: localPathFor,
   ATTRS: ATTRS,
-  REJECT_REGEX: REJECT_REGEX
+  REJECT_REGEX: REJECT_REGEX,
+  REVEAL_MARK: REVEAL_MARK
 };

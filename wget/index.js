@@ -420,6 +420,13 @@ module.exports = (socket, data, onFinished) => {
                   ' pages at the downloaded copy\n'
       });
     }
+
+    // Last, make sure nothing downloaded is left invisible.
+    try {
+      lazyImages.injectReveal(jobDir);
+    } catch (err) {
+      console.error('Could not add the image reveal snippet: ' + err.message);
+    }
     next();
   }
 
