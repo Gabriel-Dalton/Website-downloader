@@ -7,11 +7,6 @@ There is no hosted version of this fork. It runs on your own machine, because it
 writes to disk and a media-heavy site can run to a gigabyte.
 
 ![enter image description here](https://github.com/Gabriel-Dalton/Website-downloader/blob/master/public/Record.gif?raw=true)
-<div align="center">
-
-  <a href="">![CodeFactor](https://www.codefactor.io/repository/github/ahmadibrahiim/website-downloader/badge)</a>
-
-</div>
 
 ## Description 📒
  Website downloader works with `wget` and `archiver` to download all websites assets and compress then sends it back to the user through socket channel
@@ -87,7 +82,7 @@ Being honest about the limits, since the point of this is offline use:
 
 ## How to run it 🤔
 
-- `git clone https://github.com/AhmadIbrahiim/Website-downloader.git`
+- `git clone https://github.com/Gabriel-Dalton/Website-downloader.git`
 - `cd Website-downloader`
 - `$ npm install`
 - `$ npm start`
@@ -119,12 +114,14 @@ mid-file cannot be trusted.
  - Open Issue(s) with any bugs you notice.
  - Please create Pull Requests if you think it would be an added value towards our program.
 
-## Liked it ? You can buy a coffee:
+## Credit
 
-<a href="https://www.buymeacoffee.com/aibrahim" target="_blank"><img src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png" alt="Buy Me A Coffee" style="height: 41px !important;width: 174px !important;box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;-webkit-box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;" ></a>
+This is a fork of [AhmadIbrahiim/Website-downloader](https://github.com/AhmadIbrahiim/Website-downloader),
+originally written by Ahmed Ibrahim ([ahmed-ibrahim.com](https://www.ahmed-ibrahim.com)),
+MIT licensed. If the original was useful to you, you can
+[buy Ahmed a coffee](https://www.buymeacoffee.com/aibrahim).
 
-Thank you,
-
-Email: me@ahmed-ibrahim.com
-
-https://www.ahmed-ibrahim.com
+Changes in this fork: downloads that reported success while producing an empty
+archive now report the failure, assets are pulled from the CDNs most modern
+sites serve them from, and an incomplete mirror says so rather than passing
+itself off as a whole site.

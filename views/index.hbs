@@ -1,44 +1,37 @@
+<div class="wrap">
 
-
-<!-- partial:index.partial.html -->
-<header>
-  <div aria-busy="true" id="progress" hidden aria-label="Loading, please wait." role="progressbar"></div>
-</header>
-<main role="main">
-  <img src="https://www.google.com/inbox/assets/images/intro/intro-logo.png" width="100" alt="" />
-  <h1>Website Downloader</h1>
-  <p>Download all the source code and assets of any website </p>
-   <div class="container">
-  <div class="row">
-    <div class="col-lg-12" style="float: none; margin: 0 auto;">
-      <div id="custom-search-input">
-          <form class="form" id="downloadForm">
-        <div class="input-group col-md-12">
-                <input type="text" class="form-control input-lg" id="website" placeholder="https://www.google.com" />
-                <span class="input-group-btn">
-                    <button class="btn btn-info btn-lg" id="download" type="button">
-                        <i class="glyphicon glyphicon-download"></i>
-                    </button>
-                </span><br>
-              </form>
-
-        </div><br>
-          <center><!-- Place this tag where you want the button to render. -->
-<a class="github-button" href="https://github.com/Ahmadibrahiim/Website-downloader" data-icon="octicon-star" data-size="large" data-show-count="true" aria-label="Star Ahmadibrahiim/Website-downloader on GitHub">Star</a></center>
-
-<a href="https://www.buymeacoffee.com/aibrahim" target="_blank"><img src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png" alt="Buy Me A Coffee" style="height: 41px !important;width: 174px !important;box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;-webkit-box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;" ></a>
-              
-      </div>
-      <br>
-    </div>
+  <div class="masthead">
+    <h1>Website Downloader</h1>
+    <p class="tagline">Mirror a site to a folder you can browse offline, assets included.</p>
   </div>
-  <h5 hidden id='nFilesP'>Total Downloaded file: <span  id='nFiles' style="color: red;font-weight: bold">10</span></h5>
-  <p  class="log" id='log'></p>
-  <button style="display: none" class="btn btn-success">Download website assets</button>
-</div> 
 
+  <form class="download-form" id="downloadForm">
+    <input type="text" id="website" placeholder="example.com" autocomplete="off"
+           spellcheck="false" aria-label="Website address">
+    <button type="button" id="download">Download</button>
+  </form>
+  <p class="hint">Stylesheets, scripts, images and fonts are picked up too, including
+    the ones served from a CDN. Large sites can take several minutes.</p>
 
-  
-</main>
-<!-- partial -->
-  
+  <div class="progress" id="progress" hidden role="progressbar" aria-label="Downloading"></div>
+
+  <div class="stats" id="stats" hidden>
+    <span>Files fetched <b id="nFiles">0</b></span>
+  </div>
+
+  <p class="log" id="log" aria-live="polite"></p>
+
+  <div class="msg msg-error" id="errorBox" hidden role="alert"></div>
+  <div class="msg msg-warning" id="warnBox" hidden></div>
+
+  <div class="msg msg-ok" id="okBox" hidden>
+    <p id="okText">Archive ready.</p>
+    <button type="button" id="downloadWebsite">Save the zip</button>
+  </div>
+
+  <div class="foot">
+    <p>Runs on your machine. Nothing is uploaded anywhere.</p>
+    <p><a href="https://github.com/Gabriel-Dalton/Website-downloader">Source and setup guide</a></p>
+  </div>
+
+</div>
